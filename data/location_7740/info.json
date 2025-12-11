@@ -1,0 +1,111 @@
+[
+    {
+        "id": 7740,
+        "name": "Tsuen Wan",
+        "locality": "New Territories",
+        "timezone": "Asia/Hong_Kong",
+        "country": {
+            "id": 167,
+            "code": "HK",
+            "name": "Hong Kong"
+        },
+        "owner": {
+            "id": 4,
+            "name": "Unknown Governmental Organization"
+        },
+        "provider": {
+            "id": 202,
+            "name": "Hong Kong"
+        },
+        "isMobile": false,
+        "isMonitor": true,
+        "instruments": [
+            {
+                "id": 2,
+                "name": "Government Monitor"
+            }
+        ],
+        "sensors": [
+            {
+                "id": 22539,
+                "name": "co \u00b5g/m\u00b3",
+                "parameter": {
+                    "id": 4,
+                    "name": "co",
+                    "units": "\u00b5g/m\u00b3",
+                    "displayName": "CO mass"
+                }
+            },
+            {
+                "id": 22540,
+                "name": "no2 \u00b5g/m\u00b3",
+                "parameter": {
+                    "id": 5,
+                    "name": "no2",
+                    "units": "\u00b5g/m\u00b3",
+                    "displayName": "NO\u2082 mass"
+                }
+            },
+            {
+                "id": 22541,
+                "name": "o3 \u00b5g/m\u00b3",
+                "parameter": {
+                    "id": 3,
+                    "name": "o3",
+                    "units": "\u00b5g/m\u00b3",
+                    "displayName": "O\u2083 mass"
+                }
+            },
+            {
+                "id": 22542,
+                "name": "pm10 \u00b5g/m\u00b3",
+                "parameter": {
+                    "id": 1,
+                    "name": "pm10",
+                    "units": "\u00b5g/m\u00b3",
+                    "displayName": "PM10"
+                }
+            },
+            {
+                "id": 22543,
+                "name": "pm25 \u00b5g/m\u00b3",
+                "parameter": {
+                    "id": 2,
+                    "name": "pm25",
+                    "units": "\u00b5g/m\u00b3",
+                    "displayName": "PM2.5"
+                }
+            },
+            {
+                "id": 22544,
+                "name": "so2 \u00b5g/m\u00b3",
+                "parameter": {
+                    "id": 6,
+                    "name": "so2",
+                    "units": "\u00b5g/m\u00b3",
+                    "displayName": "SO\u2082 mass"
+                }
+            }
+        ],
+        "coordinates": {
+            "latitude": 22.371666666666666,
+            "longitude": 114.11444444444443
+        },
+        "licenses": null,
+        "bounds": [
+            114.11444444444443,
+            22.371666666666666,
+            114.11444444444443,
+            22.371666666666666
+        ],
+        "distance": null,
+        "datetimeFirst": {
+            "utc": "2018-01-02T22:00:00Z",
+            "local": "2018-01-03T06:00:00+08:00"
+        },
+        "datetimeLast": {
+            "utc": "2025-12-09T15:00:00Z",
+            "local": "2025-12-09T23:00:00+08:00"
+        }
+    }
+]
