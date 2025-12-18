@@ -38,39 +38,65 @@ def year_interval(datetime_from, datetime_to):
     return intervals
 
 
-def get_aqi_data(lat, lon, datetime_from, datetime_to, str_format="%Y-%m-%dT%H:%M:%S"):
-    df_list = []
+# def get_aqi_data(lat, lon, datetime_from, datetime_to, str_format="%Y-%m-%dT%H:%M:%S"):
+#     df_list = []
     
-    for dt_from, dt_to in year_interval(datetime_from, datetime_to):
-        measurement_data = []
-        unix_from = datetime_str_to_unix(dt_from, str_format)
-        unix_to = datetime_str_to_unix(dt_to, str_format)
-        timestamp_index = timestamp_index_list(dt_from, dt_to, str_format)
+#     for dt_from, dt_to in year_interval(datetime_from, datetime_to):
+#         measurement_data = []
+#         unix_from = datetime_str_to_unix(dt_from, str_format)
+#         unix_to = datetime_str_to_unix(dt_to, str_format)
+#         timestamp_index = timestamp_index_list(dt_from, dt_to, str_format)
         
-        url = f"http://api.openweathermap.org/data/2.5/air_pollution/history"
-        params = {
-            "lat": lat,
-            "lon": lon,
-            "start": unix_from,
-            "end": unix_to,
-            "appid": API_KEY
-        }
-        response = requests.get(url, params=params).json()
-        results = response.get("list", [])
+#         url = "http://api.openweathermap.org/data/2.5/air_pollution/history"
+#         params = {
+#             "lat": lat,
+#             "lon": lon,
+#             "start": unix_from,
+#             "end": unix_to,
+#             "appid": API_KEY
+#         }
+#         response = requests.get(url, params=params).json()
+#         results = response.get("list", [])
         
-        for res in results:
-            timestamp = unix_to_datetime_str(res["dt"], str_format)
-            values = res["components"]
-            measurement_data.append({"timestamp": timestamp} | values)
+#         for res in results:
+#             timestamp = unix_to_datetime_str(res["dt"], str_format)
+#             values = res["components"]
+#             measurement_data.append({"timestamp": timestamp} | values)
         
-        df = pd.DataFrame(measurement_data)
-        df.drop(["no", "nh3"], axis=1, inplace=True)
-        df = df.set_index("timestamp").reindex(timestamp_index)
+#         df = pd.DataFrame(measurement_data)
+#         df.drop(["no", "nh3"], axis=1, inplace=True)
+#         df = df.set_index("timestamp").reindex(timestamp_index)
 
-        df_list.append(df)
+#         df_list.append(df)
     
-    final_df = pd.concat(df_list, axis=0)    
-    final_df.to_csv("data/aqi.csv")
+#     final_df = pd.concat(df_list, axis=0)    
+#     final_df.to_csv("data/aqi.csv")
+
+
+def get_aqi_data(lat, lon, datetime_from, datetime_to, str_format="%Y-%m-%dT%H:%M:%S"):
+    datetime_from = datetime_from[:10]
+    datetime_to = datetime_to[:10]
+    timestamp_index = timestamp_index_list(datetime_from, datetime_to, str_format)
+
+    url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": datetime_from,
+        "end_date": datetime_to,
+        "hourly": ["carbon_monoxide", "pm10", "pm2_5", "nitrogen_dioxide", "ozone", "sulphur_dioxide"],
+        "timeformat": "unixtime"
+    }
+    
+    response = requests.get(url, params=params).json()
+    results = response.get("hourly", [])
+    
+    df = pd.DataFrame(results)
+    df["timestamp"] = df["time"].apply(lambda unix_time: unix_to_datetime_str(unix_time, str_format))
+    df.drop("time", axis=1, inplace=True)
+    df = df.set_index("timestamp").reindex(timestamp_index)
+    
+    df.to_csv("data/aqi2.csv")
     
     
 def get_weather_data(lat, lon, datetime_from, datetime_to, str_format="%Y-%m-%dT%H:%M:%S"):
@@ -78,7 +104,7 @@ def get_weather_data(lat, lon, datetime_from, datetime_to, str_format="%Y-%m-%dT
     datetime_to = datetime_to[:10]
     timestamp_index = timestamp_index_list(datetime_from, datetime_to, str_format)
 
-    url = f"https://archive-api.open-meteo.com/v1/archive"
+    url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
         "latitude": lat,
         "longitude": lon,
