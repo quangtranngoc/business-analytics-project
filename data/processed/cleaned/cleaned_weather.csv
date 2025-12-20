@@ -1,4 +1,4 @@
-time,temperature_2m,relative_humidity_2m,dew_point_2m,precipitation,surface_pressure,cloud_cover,wind_speed_10m,wind_direction_10m
+,temperature_2m,relative_humidity_2m,dew_point_2m,precipitation,surface_pressure,cloud_cover,wind_speed_10m,wind_direction_10m
 2022-08-04 00:00:00,28.3,87,25.9,0.0,1003.2,20,4.9,144
 2022-08-04 01:00:00,29.4,82,26.1,0.0,1003.4,100,4.0,170
 2022-08-04 02:00:00,30.3,80,26.4,0.0,1003.1,100,0.8,243

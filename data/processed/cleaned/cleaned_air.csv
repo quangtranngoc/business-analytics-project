@@ -1,4 +1,4 @@
-time,carbon_monoxide,pm10,pm2_5,nitrogen_dioxide,ozone,sulphur_dioxide
+,carbon_monoxide,pm10,pm2_5,nitrogen_dioxide,ozone,sulphur_dioxide
 2022-08-04 00:00:00,595.0,58.0,40.3,29.7,24.0,16.8
 2022-08-04 01:00:00,552.0,43.5,30.0,25.0,49.0,18.2
 2022-08-04 02:00:00,492.0,47.3,32.7,18.4,84.0,20.2
