@@ -1,0 +1,8 @@
+dotenv==0.9.9
+requests==2.32.5
+pandas==2.3.32
+matplotlib==3.10.8
+statsmodels==0.14.6
+kneed==0.8.5
+plotly==6.5.0
+streamlit==1.52.2
