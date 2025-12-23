@@ -1,10 +1,10 @@
 # Business Analytics Project - Air Quality Nowcasting
 
-## 🌫️ Hanoi Air Quality Nowcasting & Health Advisory
+## Hanoi Air Quality Nowcasting & Health Advisory
 
 PM2.5 nowcasting web app for Hanoi with 1-6 hour forecasts and Vietnamese AQI health advisories.
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Run the dashboard
@@ -16,9 +16,9 @@ python -m streamlit run app.py
 
 Open browser to **http://localhost:8501**
 
-## ✅ Features
+## Features
 
-- PM2.5 nowcasting (1-6 hours ahead) using ETS time series model
+- PM2.5 nowcasting (1-6 hours ahead) using time series models
 - Vietnamese AQI standards with color-coded categories
 - Health advisories for general public & sensitive groups
 - Interactive forecast charts with confidence intervals
@@ -26,7 +26,7 @@ Open browser to **http://localhost:8501**
 - Hanoi map with HUST monitoring station
 - CSV export and data refresh capabilities
 
-## 📊 Vietnamese AQI Standards
+## Vietnamese AQI Standards
 
 | PM2.5 (μg/m³) | Category | Color |
 |---------------|----------|-------|
@@ -37,36 +37,13 @@ Open browser to **http://localhost:8501**
 | 151-250 | Very Unhealthy | 🟣 Purple |
 | 250+ | Hazardous | 🟤 Maroon |
 
-## 🎯 Business Analytics Topic 9
+## Business Analytics Topic 9
 
 **Goal:** Nowcast PM2.5 and issue exposure advisories for Hanoi  
 **Methods:** Time-series nowcasting with meteorological features  
 **Deliverables:** Dashboard with alerts, AQI mapping, and health guidance
 
-## 📁 Project Structure
-
-```
-├── app.py                    # Streamlit dashboard
-├── utils.py                  # AQI conversion & API functions
-├── test_aqi.py              # AQI system tests
-├── data_cleaning.ipynb       # Data preprocessing
-├── data_exploration.ipynb    # EDA and analysis
-├── model.ipynb              # Model training
-├── data/                    # Data files
-│   ├── aqi.csv              # Air quality data
-│   ├── weather.csv          # Weather data
-│   └── processed/cleaned/   # Cleaned datasets
-└── models/ets/              # Trained ETS model
-```
-
-## 🧪 Testing
-
-```bash
-# Test AQI conversion system
-python test_aqi.py
-```
-
-## 📦 Dependencies
+## Dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -74,12 +51,8 @@ pip install -r requirements.txt
 
 Main packages: streamlit, pandas, plotly, statsmodels, requests
 
-## 🔧 Models
+## Models
 
-- **ETS (Exponential Smoothing)**: ✅ Active (univariate time series)
-- **ARIMA**: 🔜 Placeholder (to be trained)
-- **ARIMAX**: 🔜 Placeholder (with weather features)
-
----
-
-**Hanoi University of Science and Technology (HUST) - December 2025**
+- **ETS (Exponential Smoothing)**
+- **ARIMA**
+- **ARIMAX**
