@@ -53,7 +53,12 @@ Main packages: streamlit, pandas, plotly, statsmodels, requests
 
 ## Models
 
-- **ETS (Exponential Smoothing)**
-- **ARIMA**
-- **ARIMAX**
-- **VAR (Air + Weather)**
+- **ETS** - Exponential Smoothing (univariate)
+- **ARIMA** - AutoRegressive Integrated Moving Average
+- **ARIMAX** - ARIMA with weather exogenous variables
+- **VAR (Air+Weather)** - Multivariate, best for ozone
+- **VAR (Air-Only)** - Multivariate, best for PM10/PM2.5
+
+### Evaluation Metrics
+- **sMAPE** - Symmetric Mean Absolute Percentage Error
+- **MASE** - Mean Absolute Scaled Error (h-step naive baseline)

@@ -95,10 +95,15 @@ def load_models():
         with open("models/arimax/pm2_5.pickle", "rb") as f:
             models["ARIMAX"] = pickle.load(f)
     
-    # Load VAR model (Air + Weather combined)
-    if os.path.exists("models/var_air_weather/var_air_weather_model.pickle"):
-        with open("models/var_air_weather/var_air_weather_model.pickle", "rb") as f:
+    # Load VAR model (Air + Weather) - best for ozone
+    if os.path.exists("models/var/var_air_weather.pickle"):
+        with open("models/var/var_air_weather.pickle", "rb") as f:
             models["VAR (Air+Weather)"] = pickle.load(f)
+    
+    # Load VAR model (Air Only) - best for pm10, pm2_5
+    if os.path.exists("models/var/var_air_only.pickle"):
+        with open("models/var/var_air_only.pickle", "rb") as f:
+            models["VAR (Air-Only)"] = pickle.load(f)
     
     return models
 
@@ -147,7 +152,7 @@ def refit_ets_model(training_air, lat, lon):
 
 # Refit ARIMA model with recent data
 @st.cache_resource(ttl=3600)
-def refit_arima_model(training_air, lat, lon, order=(2, 0, 0)):
+def refit_arima_model(training_air, lat, lon, order=(2, 0, 1)):
     """Refit ARIMA model at forecast origin with recent data.
     
     Uses trend='c' for forecast continuity (avoids mean-reversion issues).
@@ -192,7 +197,7 @@ def refit_arima_model(training_air, lat, lon, order=(2, 0, 0)):
 
 # Refit ARIMAX model with recent data
 @st.cache_resource(ttl=3600)
-def refit_arimax_model(training_air, training_weather, lat, lon, order=(2, 0, 0)):
+def refit_arimax_model(training_air, training_weather, lat, lon, order=(2, 0, 1)):
     """Refit ARIMAX model at forecast origin with recent data.
     Uses trend='c' for forecast continuity (avoids mean-reversion issues).
     """
@@ -596,14 +601,13 @@ def main():
         
         elif selected_model_name == "VAR (Air+Weather)":
             selected_model = models[selected_model_name]
-            st.caption("Using pre-trained VAR model (Air + Weather multivariate)")
+            st.caption("Using VAR model (Air + Weather) - Best for ozone forecasting")
             
             # Use combined_df (Training + Real-time) for forecasting
             combined_df = pd.concat([air_df, weather_df], axis=1)
             
             # VAR needs lagged observations
             if combined_df.isnull().any().any():
-                # Fill missing values if any
                 combined_df = combined_df.ffill().bfill()
             
             forecast_data = combined_df
@@ -611,12 +615,33 @@ def main():
             with st.spinner("Generating forecast..."):
                 lag_order = selected_model.k_ar
                 
-                # Check if we have enough data
                 if len(combined_df) < lag_order:
                     st.error(f"Not enough data for VAR forecast. Need at least {lag_order} hours.")
                 else:
                     last_obs = combined_df.values[-lag_order:]
-                    
+                    forecast_values, forecast_df = generate_var_forecast(
+                        selected_model, last_obs=last_obs, steps=forecast_hours
+                    )
+        
+        elif selected_model_name == "VAR (Air-Only)":
+            selected_model = models[selected_model_name]
+            st.caption("Using VAR model (Air Only) - Best for PM10, PM2.5 forecasting")
+            
+            # Use air_df only for forecasting
+            air_only_df = air_df.copy()
+            
+            if air_only_df.isnull().any().any():
+                air_only_df = air_only_df.ffill().bfill()
+            
+            forecast_data = air_only_df
+            
+            with st.spinner("Generating forecast..."):
+                lag_order = selected_model.k_ar
+                
+                if len(air_only_df) < lag_order:
+                    st.error(f"Not enough data for VAR forecast. Need at least {lag_order} hours.")
+                else:
+                    last_obs = air_only_df.values[-lag_order:]
                     forecast_values, forecast_df = generate_var_forecast(
                         selected_model, last_obs=last_obs, steps=forecast_hours
                     )
