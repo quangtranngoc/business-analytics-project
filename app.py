@@ -5,12 +5,11 @@ import pickle
 from datetime import datetime, timedelta
 import json
 import os
-from utils import pm25_to_vn_aqi, get_health_recommendations, get_aqi_data, get_weather_data
+from utils import pm25_to_vn_aqi, get_health_recommendations, get_latest_realtime_data
 
 # Page configuration
 st.set_page_config(
     page_title="Hanoi Air Quality Nowcasting",
-    page_icon="🌫️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -49,6 +48,33 @@ def load_cleaned_data():
     weather_df = pd.read_csv("data/processed/cleaned/cleaned_weather.csv", index_col=0, parse_dates=True)
     return air_df, weather_df
 
+# Load real-time data
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_realtime_data(lat, lon):
+    """Load latest real-time data."""
+    try:
+        air_rt, weather_rt, last_update = get_latest_realtime_data(lat, lon)
+        return air_rt, weather_rt, last_update, None
+    except Exception as e:
+        return None, None, None, str(e)
+
+# Combine training and real-time data in memory
+def get_combined_data(training_air, training_weather, realtime_air, realtime_weather):
+    """Combine historical training data with real-time data."""
+    if realtime_air is not None and not realtime_air.empty:
+        combined_air = pd.concat([training_air, realtime_air]).sort_index()
+        combined_air = combined_air[~combined_air.index.duplicated(keep='last')]
+    else:
+        combined_air = training_air
+    
+    if realtime_weather is not None and not realtime_weather.empty:
+        combined_weather = pd.concat([training_weather, realtime_weather]).sort_index()
+        combined_weather = combined_weather[~combined_weather.index.duplicated(keep='last')]
+    else:
+        combined_weather = training_weather
+    
+    return combined_air, combined_weather
+
 # Load trained models
 @st.cache_resource
 def load_models():
@@ -72,13 +98,59 @@ def load_models():
     
     return models
 
+# Refit ETS model with recent data
+@st.cache_resource(ttl=3600)  # Cache for 1 hour
+def refit_ets_model(training_air, lat, lon):
+    """Refit ETS model with recent data from API + real-time data."""
+    from statsmodels.tsa.exponential_smoothing.ets import ETSModel
+    from utils import get_aqi_data, get_latest_realtime_data
+    
+    # Get date range for fetching recent data
+    training_end = training_air.index[-1]
+    now = datetime.now()
+    
+    try:
+        # Fetch historical recent data (archive API - up to yesterday)
+        recent_data = get_aqi_data(
+            lat, lon,
+            training_end.strftime("%Y-%m-%dT%H:%M:%S"),
+            now.strftime("%Y-%m-%dT%H:%M:%S")
+        )
+        recent_data.index = pd.to_datetime(recent_data.index)
+        
+        # Fetch real-time data (forecast API - includes current hour)
+        realtime_air, _, _ = get_latest_realtime_data(lat, lon)
+        
+        # Combine all three: training + recent archive + real-time
+        combined = pd.concat([training_air, recent_data, realtime_air]).sort_index()
+        combined = combined[~combined.index.duplicated(keep='last')]
+        
+        # Retrain ETS model with same configuration as pretrained
+        pm25_series = combined['pm2_5'].dropna()
+        model = ETSModel(
+            pm25_series, 
+            error='add', 
+            trend='add', 
+            seasonal='add',
+            seasonal_periods=4,
+            damped_trend=True
+        )
+        fitted_model = model.fit(disp=False)
+        
+        return fitted_model, combined, None
+        
+    except Exception as e:
+        return None, training_air, str(e)
+
 # Generate forecast
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=300)  # Cache for 5 minutes  
 def generate_forecast(_model, steps=6):
-    """Generate forecast using the selected model."""
+    """Generate forecast using the raw ETS model."""
     forecast = _model.forecast(steps=steps)
-    forecast_df = _model.get_prediction(start=len(_model.data.orig_endog), 
-                                         end=len(_model.data.orig_endog) + steps - 1).summary_frame()
+    forecast_df = _model.get_prediction(
+        start=len(_model.data.orig_endog),
+        end=len(_model.data.orig_endog) + steps - 1
+    ).summary_frame()
     
     return forecast, forecast_df
 
@@ -202,18 +274,28 @@ def create_map_visualization(lat, lon, aqi_info):
 # Main app
 def main():
     # Header
-    st.markdown('<div class="main-header">🌫️ Hanoi Air Quality Nowcasting & Health Advisory</div>', 
+    st.markdown('<div class="main-header">Hanoi Air Quality Nowcasting & Health Advisory</div>', 
                 unsafe_allow_html=True)
     st.markdown("**Hanoi University of Science and Technology (HUST) Station**")
     st.markdown("---")
     
     # Load data
     location_info = load_location_info()
-    air_df, weather_df = load_cleaned_data()
+    training_air, training_weather = load_cleaned_data()
+    
+    # Load real-time data
+    realtime_air, realtime_weather, rt_last_update, rt_error = load_realtime_data(
+        location_info['lat'], 
+        location_info['lon']
+    )
+    
+    # Combine training + real-time data in memory only
+    air_df, weather_df = get_combined_data(training_air, training_weather, realtime_air, realtime_weather)
+    
     models = load_models()
     
     # Sidebar configuration
-    st.sidebar.header("⚙️ Configuration")
+    st.sidebar.header("Configuration")
     
     # Model selection
     available_models = list(models.keys())
@@ -238,7 +320,7 @@ def main():
     
     # Current conditions
     st.sidebar.markdown("---")
-    st.sidebar.header("📊 Current Conditions")
+    st.sidebar.header("Current Conditions")
     current_pm25 = air_df['pm2_5'].iloc[-1]
     current_temp = weather_df['temperature_2m'].iloc[-1]
     current_humidity = weather_df['relative_humidity_2m'].iloc[-1]
@@ -251,55 +333,56 @@ def main():
     
     # Last updated
     last_update = air_df.index[-1]
+    update_source = "Real-time" if rt_last_update and rt_last_update == last_update else "Training data"
     st.sidebar.markdown(f"**Last Updated:** {last_update.strftime('%Y-%m-%d %H:%M')}")
-    
+    st.sidebar.caption(f"Source: {update_source}")
+
     # Refresh data button
     st.sidebar.markdown("---")
-    if st.sidebar.button("🔄 Refresh Latest Data", help="Fetch the most recent air quality and weather data"):
-        with st.spinner("Fetching latest data..."):
-            try:
-                # Get current date
-                now = datetime.now()
-                yesterday = now - timedelta(days=1)
-                
-                # Fetch latest data
-                get_aqi_data(
-                    location_info['lat'],
-                    location_info['lon'],
-                    yesterday.strftime("%Y-%m-%dT%H:%M:%S"),
-                    now.strftime("%Y-%m-%dT%H:%M:%S")
-                )
-                get_weather_data(
-                    location_info['lat'],
-                    location_info['lon'],
-                    yesterday.strftime("%Y-%m-%dT%H:%M:%S"),
-                    now.strftime("%Y-%m-%dT%H:%M:%S")
-                )
-                st.sidebar.success("✅ Data refreshed successfully!")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.sidebar.error(f"❌ Error refreshing data: {str(e)}")
+    if st.sidebar.button("Refresh Latest Data", help="Fetch the most recent air quality and weather data (won't modify training data)"):
+        # Clear cache to force reload
+        st.cache_data.clear()
+        st.sidebar.success("Refreshing...")
+        st.rerun()
     
     # Main content area
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("📈 PM2.5 Forecast")
+        st.subheader("PM2.5 Forecast")
         
-        # Generate forecast
-        selected_model = models[selected_model_name]
+        # Refit ETS model with recent data
+        if selected_model_name == "ETS":
+            with st.spinner("Refitting model with recent data..."):
+                refitted_model, updated_air_df, refit_error = refit_ets_model(
+                    training_air, 
+                    location_info['lat'], 
+                    location_info['lon']
+                )
+            
+            if refit_error:
+                st.warning(f"Could not refit model: {refit_error}. Using pre-trained model.")
+                selected_model = models[selected_model_name]
+                forecast_data = air_df
+            else:
+                selected_model = refitted_model
+                forecast_data = updated_air_df
+                # Show refit info
+                st.caption(f"Model refitted with data up to {updated_air_df.index[-1].strftime('%Y-%m-%d %H:%M')}")
+        else:
+            selected_model = models[selected_model_name]
+            forecast_data = air_df
         
         with st.spinner("Generating forecast..."):
             forecast_values, forecast_df = generate_forecast(selected_model, steps=forecast_hours)
         
         # Create and display plot
-        fig = create_forecast_plot(air_df, forecast_df, forecast_hours)
+        fig = create_forecast_plot(forecast_data, forecast_df, forecast_hours)
         st.plotly_chart(fig, width='stretch')
         
         # Forecast table
-        with st.expander("📋 View Detailed Forecast Table"):
-            last_timestamp = air_df.index[-1]
+        with st.expander("View Detailed Forecast Table"):
+            last_timestamp = forecast_data.index[-1]
             forecast_timestamps = pd.date_range(
                 start=last_timestamp + timedelta(hours=1),
                 periods=forecast_hours,
@@ -332,22 +415,22 @@ def main():
             # Download button
             csv = forecast_table.to_csv(index=False)
             st.download_button(
-                label="📥 Download Forecast as CSV",
+                label="Download Forecast as CSV",
                 data=csv,
                 file_name=f"hanoi_pm25_forecast_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv"
             )
     
     with col2:
-        st.subheader("🎯 Air Quality Index")
+        st.subheader("Air Quality Index")
         
         # Current AQI
         current_aqi_info = pm25_to_vn_aqi(current_pm25)
         
         st.markdown(f"""
-        <div class="metric-card" style="background-color: {current_aqi_info['color']}; color: white;">
-            <h2>{current_aqi_info['icon']} {current_aqi_info['category']}</h2>
-            <h1>AQI: {current_aqi_info['aqi']}</h1>
+        <div class="metric-card" style="background-color: #f8f9fa; border: 2px solid {current_aqi_info['color']};">
+            <h2 style="color: {current_aqi_info['color']};">{current_aqi_info['icon']} {current_aqi_info['category']}</h2>
+            <h1 style="color: {current_aqi_info['color']};">AQI: {current_aqi_info['aqi']}</h1>
             <h3>PM2.5: {current_aqi_info['pm25']:.1f} μg/m³</h3>
         </div>
         """, unsafe_allow_html=True)
@@ -356,27 +439,27 @@ def main():
         next_hour_pm25 = forecast_df['mean'].iloc[0]
         next_hour_aqi_info = pm25_to_vn_aqi(next_hour_pm25)
         
-        st.markdown("### 📍 Next Hour Forecast")
+        st.markdown("### Next Hour Forecast")
         st.markdown(f"""
-        <div class="metric-card" style="background-color: {next_hour_aqi_info['color']}; color: white;">
-            <h3>{next_hour_aqi_info['icon']} {next_hour_aqi_info['category']}</h3>
-            <h2>AQI: {next_hour_aqi_info['aqi']}</h2>
+        <div class="metric-card" style="background-color: #f8f9fa; border: 2px solid {next_hour_aqi_info['color']};">
+            <h3 style="color: {next_hour_aqi_info['color']};">{next_hour_aqi_info['icon']} {next_hour_aqi_info['category']}</h3>
+            <h2 style="color: {next_hour_aqi_info['color']};">AQI: {next_hour_aqi_info['aqi']}</h2>
             <p>PM2.5: {next_hour_aqi_info['pm25']:.1f} μg/m³</p>
         </div>
         """, unsafe_allow_html=True)
         
         # Health advisory
-        st.markdown("### 🏥 Health Advisory")
+        st.markdown("### Health Advisory")
         health_rec = get_health_recommendations(current_aqi_info['category'])
         
         st.info(f"**General Population:**\n{health_rec['general']}")
         st.warning(f"**Sensitive Groups:**\n{health_rec['sensitive']}")
         
-        with st.expander("📋 Recommended Actions"):
+        with st.expander("Recommended Actions"):
             st.markdown(health_rec['activities'])
         
         # Alert system
-        st.markdown("### 🚨 Alerts")
+        st.markdown("### Alerts")
         
         # Check if any forecast exceeds unhealthy threshold
         unhealthy_forecasts = forecast_df['mean'][:forecast_hours][forecast_df['mean'][:forecast_hours] > 90]
@@ -408,7 +491,7 @@ def main():
     
     # Map section
     st.markdown("---")
-    st.subheader("🗺️ Hanoi Air Quality Map")
+    st.subheader("Hanoi Air Quality Map")
     
     map_fig = create_map_visualization(
         location_info['lat'],
@@ -422,8 +505,8 @@ def main():
     st.markdown("""
     <div style="text-align: center; color: #666; font-size: 0.9rem;">
         <p><b>Data Sources:</b> Open-Meteo Air Quality API | <b>Model:</b> {model_name} | <b>Update Frequency:</b> Hourly</p>
-        <p>🎓 Business Analytics Project - Air Quality Nowcasting & Health Advisory System</p>
-        <p>⚠️ This is a forecasting system. For official air quality information, consult local authorities.</p>
+        <p>Business Analytics Project - Air Quality Nowcasting & Health Advisory System</p>
+        <p>This is a forecasting system. For official air quality information, consult local authorities.</p>
     </div>
     """.format(model_name=selected_model_name), unsafe_allow_html=True)
 
