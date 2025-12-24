@@ -95,7 +95,7 @@ def get_aqi_data(lat, lon, datetime_from, datetime_to, str_format="%Y-%m-%dT%H:%
     df.drop("time", axis=1, inplace=True)
     df = df.set_index("timestamp").reindex(timestamp_index)
     
-    df.to_csv("data/aqi2.csv")
+    return df
     
     
 def get_weather_data(lat, lon, datetime_from, datetime_to, str_format="%Y-%m-%dT%H:%M:%S"):
@@ -122,7 +122,7 @@ def get_weather_data(lat, lon, datetime_from, datetime_to, str_format="%Y-%m-%dT
     df.drop("time", axis=1, inplace=True)
     df = df.set_index("timestamp").reindex(timestamp_index)
     
-    df.to_csv("data/weather.csv")
+    return df
 
 
 def pm25_to_vn_aqi(pm25_value):
@@ -140,39 +140,39 @@ def pm25_to_vn_aqi(pm25_value):
     if pm25_value <= 25:
         category = "Good"
         aqi = int((50 / 25) * pm25_value)
-        color = "#00E400"  # Green
+        color = "#228B22"  # Forest Green
         health = "Air quality is good. Ideal for outdoor activities."
-        icon = "😊"
+        icon = "🟢"
     elif pm25_value <= 50:
         category = "Moderate"
         aqi = int(50 + ((50 / 25) * (pm25_value - 25)))
-        color = "#FFFF00"  # Yellow
+        color = "#DAA520"  # Goldenrod
         health = "Air quality is acceptable. Sensitive individuals should consider reducing prolonged outdoor exertion."
-        icon = "😐"
+        icon = "🟡"
     elif pm25_value <= 90:
         category = "Unhealthy for Sensitive Groups"
         aqi = int(100 + ((50 / 40) * (pm25_value - 50)))
         color = "#FF7E00"  # Orange
         health = "Sensitive groups (children, elderly, people with respiratory conditions) should reduce prolonged outdoor activities."
-        icon = "😷"
+        icon = "🟠"
     elif pm25_value <= 150:
         category = "Unhealthy"
         aqi = int(150 + ((50 / 60) * (pm25_value - 90)))
         color = "#FF0000"  # Red
         health = "Everyone should reduce prolonged outdoor exertion. Sensitive groups should avoid outdoor activities."
-        icon = "⚠️"
+        icon = "🔴"
     elif pm25_value <= 250:
         category = "Very Unhealthy"
         aqi = int(200 + ((100 / 100) * (pm25_value - 150)))
         color = "#8F3F97"  # Purple
         health = "Health alert! Everyone should avoid prolonged outdoor activities. Wear masks if going outside."
-        icon = "🚨"
+        icon = "🟣"
     else:
         category = "Hazardous"
         aqi = int(300 + ((200 / 250) * min(pm25_value - 250, 250)))
         color = "#7E0023"  # Maroon
         health = "Health emergency! Everyone should avoid all outdoor activities. Stay indoors with air purifiers."
-        icon = "☠️"
+        icon = "🟤"
     
     return {
         "pm25": round(pm25_value, 2),
@@ -182,6 +182,52 @@ def pm25_to_vn_aqi(pm25_value):
         "health_advisory": health,
         "icon": icon
     }
+
+
+def get_latest_realtime_data(lat, lon, str_format="%Y-%m-%dT%H:%M:%S"):
+    """Fetch the latest real-time data including current hour.
+    """
+    from datetime import datetime, timedelta
+    
+    now = datetime.now()
+    week_ago = now - timedelta(days=7)
+    
+    fetch_from = week_ago.strftime("%Y-%m-%dT00:00:00")
+    fetch_to = now.strftime("%Y-%m-%dT%H:%M:%S")
+    
+    try:
+        air_url = "https://air-quality-api.open-meteo.com/v1/air-quality"
+        air_params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": ["carbon_monoxide", "pm10", "pm2_5", "nitrogen_dioxide", "ozone", "sulphur_dioxide"],
+            "past_days": 7,
+            "forecast_days": 1,
+            "timeformat": "unixtime"
+        }
+        
+        air_response = requests.get(air_url, params=air_params).json()
+        air_results = air_response.get("hourly", {})
+        
+        if air_results:
+            air_df = pd.DataFrame(air_results)
+            air_df["timestamp"] = air_df["time"].apply(lambda unix_time: unix_to_datetime_str(unix_time, str_format))
+            air_df.drop("time", axis=1, inplace=True)
+            air_df = air_df.set_index("timestamp")
+            air_df.index = pd.to_datetime(air_df.index)
+            # Filter out future timestamps and NaN pm2_5
+            air_df = air_df[air_df.index <= now]
+            air_df = air_df.dropna(subset=['pm2_5'])
+        else:
+            air_df = pd.DataFrame()
+        
+        weather_df = get_weather_data(lat, lon, fetch_from, fetch_to, str_format)
+        weather_df.index = pd.to_datetime(weather_df.index)
+        last_air_date = air_df.index[-1] if not air_df.empty else None
+
+        return air_df, weather_df, last_air_date
+    except Exception as e:
+        raise Exception(f"Failed to fetch real-time data: {str(e)}")
 
 
 def get_health_recommendations(aqi_category):
@@ -205,17 +251,17 @@ def get_health_recommendations(aqi_category):
         "Unhealthy": {
             "general": "Everyone may experience health effects.",
             "sensitive": "Sensitive groups may experience more serious effects. Avoid outdoor activities.",
-            "activities": "❌ Sensitive groups: stay indoors\n⚠️ General public: reduce prolonged outdoor exertion\n🏠 Consider indoor alternatives for exercise\n😷 Wear N95 masks if going outside"
+            "activities": "❌ Sensitive groups: stay indoors\n⚠️ General public: reduce prolonged outdoor exertion\n Consider indoor alternatives for exercise\n Wear N95 masks if going outside"
         },
         "Very Unhealthy": {
             "general": "Health alert! Everyone should limit outdoor activities.",
             "sensitive": "Sensitive groups should stay indoors and keep activity levels low.",
-            "activities": "❌ Avoid all prolonged outdoor activities\n🏠 Stay indoors with windows closed\n😷 Wear N95/KF94 masks if must go outside\n💨 Use air purifiers indoors\n⚠️ Cancel outdoor events"
+            "activities": "❌ Avoid all prolonged outdoor activities\n Stay indoors with windows closed\n Wear N95/KF94 masks if must go outside\n Use air purifiers indoors\n⚠️ Cancel outdoor events"
         },
         "Hazardous": {
             "general": "Health emergency! Everyone should avoid outdoor activities.",
             "sensitive": "Everyone should stay indoors and avoid all physical activities outdoors.",
-            "activities": "🚨 STAY INDOORS - Health Emergency!\n❌ Cancel all outdoor activities\n😷 Wear N95 masks even for brief outdoor exposure\n💨 Use air purifiers at maximum setting\n🪟 Seal windows and doors\n🏥 Seek medical attention if experiencing symptoms"
+            "activities": " STAY INDOORS - Health Emergency!\n❌ Cancel all outdoor activities\n Wear N95 masks even for brief outdoor exposure\n Use air purifiers at maximum setting\n Seal windows and doors\n Seek medical attention if experiencing symptoms"
         }
     }
     return recommendations.get(aqi_category, recommendations["Good"])
