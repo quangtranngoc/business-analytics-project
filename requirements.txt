@@ -6,3 +6,4 @@ statsmodels==0.14.6
 kneed==0.8.5
 plotly==6.5.0
 streamlit==1.52.2
+scikit-learn==1.8.0

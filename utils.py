@@ -137,6 +137,19 @@ def pm25_to_vn_aqi(pm25_value):
     - Very Unhealthy: 151-250 μg/m³
     - Hazardous: >250 μg/m³
     """
+    import math
+    
+    # Handle NaN values
+    if pm25_value is None or (isinstance(pm25_value, float) and math.isnan(pm25_value)):
+        return {
+            "pm25": None,
+            "aqi": None,
+            "category": "No Data",
+            "color": "#808080",  # Gray
+            "health_advisory": "Data not available.",
+            "icon": "⚪"
+        }
+    
     if pm25_value <= 25:
         category = "Good"
         aqi = int((50 / 25) * pm25_value)
@@ -265,6 +278,40 @@ def get_health_recommendations(aqi_category):
         }
     }
     return recommendations.get(aqi_category, recommendations["Good"])
+
+
+def get_weather_forecast(lat, lon, hours=6, str_format="%Y-%m-%dT%H:%M:%S"):
+    """Fetch weather forecast data for the next N hours.
+    """
+    try:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": ["temperature_2m", "relative_humidity_2m", "dew_point_2m", "precipitation",
+                       "surface_pressure", "cloud_cover", "wind_speed_10m", "wind_direction_10m"],
+            "forecast_days": 2,
+            "timeformat": "unixtime"
+        }
+        
+        response = requests.get(url, params=params).json()
+        results = response.get("hourly", {})
+        
+        if results:
+            df = pd.DataFrame(results)
+            df["timestamp"] = df["time"].apply(lambda unix_time: unix_to_datetime_str(unix_time, str_format))
+            df.drop("time", axis=1, inplace=True)
+            df = df.set_index("timestamp")
+            df.index = pd.to_datetime(df.index)
+            
+            # Filter to get only future hours
+            now = datetime.now()
+            df = df[df.index > now].head(hours)
+            
+            return df
+        return pd.DataFrame()
+    except Exception as e:
+        raise Exception(f"Failed to fetch weather forecast: {str(e)}")
 
 
 if __name__ == "__main__":
