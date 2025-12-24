@@ -56,3 +56,4 @@ Main packages: streamlit, pandas, plotly, statsmodels, requests
 - **ETS (Exponential Smoothing)**
 - **ARIMA**
 - **ARIMAX**
+- **VAR (Air + Weather)**

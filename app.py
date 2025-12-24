@@ -79,22 +79,26 @@ def get_combined_data(training_air, training_weather, realtime_air, realtime_wea
 @st.cache_resource
 def load_models():
     models = {}
-    model_dir = "models/ets"
     
     # Load ETS model
-    if os.path.exists(f"{model_dir}/pm2_5.pickle"):
-        with open(f"{model_dir}/pm2_5.pickle", "rb") as f:
+    if os.path.exists("models/ets/pm2_5.pickle"):
+        with open("models/ets/pm2_5.pickle", "rb") as f:
             models["ETS"] = pickle.load(f)
     
-    # Placeholder for ARIMA model
-    # if os.path.exists(f"models/arima/pm2_5.pickle"):
-    #     with open(f"models/arima/pm2_5.pickle", "rb") as f:
-    #         models["ARIMA"] = pickle.load(f)
+    # Load ARIMA model
+    if os.path.exists("models/arima/pm2_5.pickle"):
+        with open("models/arima/pm2_5.pickle", "rb") as f:
+            models["ARIMA"] = pickle.load(f)
     
-    # Placeholder for ARIMAX model
-    # if os.path.exists(f"models/arimax/pm2_5.pickle"):
-    #     with open(f"models/arimax/pm2_5.pickle", "rb") as f:
-    #         models["ARIMAX"] = pickle.load(f)
+    # Load ARIMAX model
+    if os.path.exists("models/arimax/pm2_5.pickle"):
+        with open("models/arimax/pm2_5.pickle", "rb") as f:
+            models["ARIMAX"] = pickle.load(f)
+    
+    # Load VAR model (Air + Weather combined)
+    if os.path.exists("models/var_air_weather/var_air_weather_model.pickle"):
+        with open("models/var_air_weather/var_air_weather_model.pickle", "rb") as f:
+            models["VAR (Air+Weather)"] = pickle.load(f)
     
     return models
 
@@ -110,7 +114,7 @@ def refit_ets_model(training_air, lat, lon):
     now = datetime.now()
     
     try:
-        # Fetch historical recent data (archive API - up to yesterday)
+        # Fetch historical recent data
         recent_data = get_aqi_data(
             lat, lon,
             training_end.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -118,7 +122,7 @@ def refit_ets_model(training_air, lat, lon):
         )
         recent_data.index = pd.to_datetime(recent_data.index)
         
-        # Fetch real-time data (forecast API - includes current hour)
+        # Fetch real-time data
         realtime_air, _, _ = get_latest_realtime_data(lat, lon)
         
         # Combine all three: training + recent archive + real-time
@@ -128,12 +132,11 @@ def refit_ets_model(training_air, lat, lon):
         # Retrain ETS model with same configuration as pretrained
         pm25_series = combined['pm2_5'].dropna()
         model = ETSModel(
-            pm25_series, 
+            pm25_series,
             error='add', 
-            trend='add', 
-            seasonal='add',
-            seasonal_periods=4,
-            damped_trend=True
+            trend=None, 
+            seasonal='mul',
+            seasonal_periods=24
         )
         fitted_model = model.fit(disp=False)
         
@@ -142,10 +145,116 @@ def refit_ets_model(training_air, lat, lon):
     except Exception as e:
         return None, training_air, str(e)
 
-# Generate forecast
-@st.cache_data(ttl=300)  # Cache for 5 minutes  
-def generate_forecast(_model, steps=6):
-    """Generate forecast using the raw ETS model."""
+# Refit ARIMA model with recent data
+@st.cache_resource(ttl=3600)
+def refit_arima_model(training_air, lat, lon, order=(2, 0, 0)):
+    """Refit ARIMA model at forecast origin with recent data.
+    
+    Uses trend='c' for forecast continuity (avoids mean-reversion issues).
+    """
+    from statsmodels.tsa.arima.model import ARIMA
+    from utils import get_aqi_data, get_latest_realtime_data
+    import warnings
+    
+    training_end = training_air.index[-1]
+    now = datetime.now()
+    
+    try:
+        # Fetch recent data
+        recent_data = get_aqi_data(
+            lat, lon,
+            training_end.strftime("%Y-%m-%dT%H:%M:%S"),
+            now.strftime("%Y-%m-%dT%H:%M:%S")
+        )
+        recent_data.index = pd.to_datetime(recent_data.index)
+        
+        # Fetch real-time data
+        realtime_air, _, _ = get_latest_realtime_data(lat, lon)
+        
+        # Combine all data
+        combined = pd.concat([training_air, recent_data, realtime_air]).sort_index()
+        combined = combined[~combined.index.duplicated(keep='last')]
+        
+        # Prepare series
+        pm25_series = combined['pm2_5'].dropna()
+        pm25_series.index.freq = 'h'
+        
+        # Retrain ARIMA with trend='c' for forecast continuity
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = ARIMA(pm25_series, order=order, trend='c')
+            fitted_model = model.fit()
+        
+        return fitted_model, combined, None
+        
+    except Exception as e:
+        return None, training_air, str(e)
+
+# Refit ARIMAX model with recent data
+@st.cache_resource(ttl=3600)
+def refit_arimax_model(training_air, training_weather, lat, lon, order=(2, 0, 0)):
+    """Refit ARIMAX model at forecast origin with recent data.
+    Uses trend='c' for forecast continuity (avoids mean-reversion issues).
+    """
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+    from utils import get_aqi_data, get_weather_data, get_latest_realtime_data
+    import warnings
+    
+    training_end = training_air.index[-1]
+    now = datetime.now()
+    
+    try:
+        # Fetch recent air data
+        recent_air = get_aqi_data(
+            lat, lon,
+            training_end.strftime("%Y-%m-%dT%H:%M:%S"),
+            now.strftime("%Y-%m-%dT%H:%M:%S")
+        )
+        recent_air.index = pd.to_datetime(recent_air.index)
+        
+        # Fetch recent weather data
+        recent_weather = get_weather_data(
+            lat, lon,
+            training_end.strftime("%Y-%m-%dT%H:%M:%S"),
+            now.strftime("%Y-%m-%dT%H:%M:%S")
+        )
+        recent_weather.index = pd.to_datetime(recent_weather.index)
+        
+        # Fetch real-time data
+        realtime_air, realtime_weather, _ = get_latest_realtime_data(lat, lon)
+        
+        # Combine air data
+        combined_air = pd.concat([training_air, recent_air, realtime_air]).sort_index()
+        combined_air = combined_air[~combined_air.index.duplicated(keep='last')]
+        
+        # Combine weather data
+        combined_weather = pd.concat([training_weather, recent_weather, realtime_weather]).sort_index()
+        combined_weather = combined_weather[~combined_weather.index.duplicated(keep='last')]
+        
+        # Align and prepare data
+        pm25_series = combined_air['pm2_5'].dropna()
+        pm25_series.index.freq = 'h'
+        
+        # Align exog with endog
+        exog = combined_weather.reindex(pm25_series.index).ffill().bfill()
+        exog = exog[training_weather.columns]  # Ensure column order
+        
+        # Retrain SARIMAX with trend='c' for forecast continuity
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = SARIMAX(pm25_series, exog=exog, order=order, trend='c')
+            fitted_model = model.fit(disp=False)
+        
+        return fitted_model, combined_air, None
+        
+    except Exception as e:
+        return None, training_air, str(e)
+
+
+# Generate ETS forecast
+@st.cache_data(ttl=300)
+def generate_ets_forecast(_model, steps=6):
+    """Generate forecast using the ETS model."""
     forecast = _model.forecast(steps=steps)
     forecast_df = _model.get_prediction(
         start=len(_model.data.orig_endog),
@@ -153,6 +262,50 @@ def generate_forecast(_model, steps=6):
     ).summary_frame()
     
     return forecast, forecast_df
+
+# Generate ARIMA forecast
+@st.cache_data(ttl=300)
+def generate_arima_forecast(_model, steps=6):
+    """Generate forecast using the ARIMA model."""
+    forecast_result = _model.get_forecast(steps=steps)
+    forecast = forecast_result.predicted_mean
+    forecast_df = forecast_result.summary_frame()
+
+    forecast_df = forecast_df.rename(columns={
+        'mean': 'mean',
+        'mean_ci_lower': 'mean_ci_lower',
+        'mean_ci_upper': 'mean_ci_upper'
+    })
+    
+    return forecast, forecast_df
+
+# Generate ARIMAX forecast
+@st.cache_data(ttl=300)
+def generate_arimax_forecast(_model, exog, steps=6):
+    """Generate forecast using the ARIMAX model with exogenous variables."""
+    forecast_result = _model.get_forecast(steps=steps, exog=exog)
+    forecast = forecast_result.predicted_mean
+    forecast_df = forecast_result.summary_frame()
+    
+    return forecast, forecast_df
+
+
+# Generate VAR forecast
+@st.cache_data(ttl=300)
+def generate_var_forecast(_model, last_obs, steps=6):
+    """Generate forecast using the VAR model (multivariate)."""
+
+    forecast = _model.forecast(y=last_obs, steps=steps)
+    col_names = _model.names
+    pm25_idx = col_names.index('pm2_5') if 'pm2_5' in col_names else 2
+    pm25_forecast = forecast[:, pm25_idx]
+    
+    forecast_df = pd.DataFrame({
+        'mean': pm25_forecast,
+    })
+    
+    return pm25_forecast, forecast_df
+
 
 # Create visualization
 def create_forecast_plot(historical_data, forecast_data, forecast_hours):
@@ -351,8 +504,11 @@ def main():
     with col1:
         st.subheader("PM2.5 Forecast")
         
-        # Refit ETS model with recent data
+        forecast_data = air_df
+        
+        # Handle different model types
         if selected_model_name == "ETS":
+            # Refit ETS model with recent data
             with st.spinner("Refitting model with recent data..."):
                 refitted_model, updated_air_df, refit_error = refit_ets_model(
                     training_air, 
@@ -363,18 +519,111 @@ def main():
             if refit_error:
                 st.warning(f"Could not refit model: {refit_error}. Using pre-trained model.")
                 selected_model = models[selected_model_name]
-                forecast_data = air_df
             else:
                 selected_model = refitted_model
                 forecast_data = updated_air_df
-                # Show refit info
                 st.caption(f"Model refitted with data up to {updated_air_df.index[-1].strftime('%Y-%m-%d %H:%M')}")
-        else:
-            selected_model = models[selected_model_name]
-            forecast_data = air_df
+            
+            with st.spinner("Generating forecast..."):
+                forecast_values, forecast_df = generate_ets_forecast(selected_model, steps=forecast_hours)
         
-        with st.spinner("Generating forecast..."):
-            forecast_values, forecast_df = generate_forecast(selected_model, steps=forecast_hours)
+        elif selected_model_name == "ARIMA":
+            # Refit ARIMA model at forecast origin with trend='c'
+            with st.spinner("Refitting ARIMA model with recent data..."):
+                refitted_model, updated_air_df, refit_error = refit_arima_model(
+                    training_air,
+                    location_info['lat'],
+                    location_info['lon']
+                )
+            
+            if refit_error:
+                st.warning(f"Could not refit model: {refit_error}. Using pre-trained model.")
+                selected_model = models[selected_model_name]
+            else:
+                selected_model = refitted_model
+                forecast_data = updated_air_df
+                st.caption(f"Model refitted with data up to {updated_air_df.index[-1].strftime('%Y-%m-%d %H:%M')}")
+            
+            with st.spinner("Generating forecast..."):
+                forecast_values, forecast_df = generate_arima_forecast(selected_model, steps=forecast_hours)
+        
+        elif selected_model_name == "ARIMAX":
+            from utils import get_weather_forecast
+            
+            # Refit ARIMAX model at forecast origin with trend='c'
+            with st.spinner("Refitting ARIMAX model with recent data..."):
+                refitted_model, updated_air_df, refit_error = refit_arimax_model(
+                    training_air,
+                    training_weather,
+                    location_info['lat'],
+                    location_info['lon']
+                )
+            
+            if refit_error:
+                st.warning(f"Could not refit model: {refit_error}. Using pre-trained model.")
+                selected_model = models[selected_model_name]
+            else:
+                selected_model = refitted_model
+                forecast_data = updated_air_df
+                st.caption(f"Model refitted with data up to {updated_air_df.index[-1].strftime('%Y-%m-%d %H:%M')}")
+            
+            # Get weather forecast for exog
+            with st.spinner("Fetching weather forecast..."):
+                try:
+                    weather_forecast = get_weather_forecast(
+                        location_info['lat'], 
+                        location_info['lon'], 
+                        hours=forecast_hours
+                    )
+                    
+                    if weather_forecast.empty or len(weather_forecast) < forecast_hours:
+                        st.warning("Insufficient weather forecast. Falling back to ARIMA.")
+                        forecast_values, forecast_df = generate_arima_forecast(
+                            models.get("ARIMA", selected_model), steps=forecast_hours
+                        )
+                    else:
+                        # Ensure column order matches training data
+                        weather_forecast = weather_forecast[training_weather.columns]
+                        with st.spinner("Generating forecast..."):
+                            forecast_values, forecast_df = generate_arimax_forecast(
+                                selected_model, exog=weather_forecast.values, steps=forecast_hours
+                            )
+                except Exception as e:
+                    st.warning(f"Weather forecast error: {e}. Falling back to ARIMA.")
+                    forecast_values, forecast_df = generate_arima_forecast(
+                        models.get("ARIMA", selected_model), steps=forecast_hours
+                    )
+        
+        elif selected_model_name == "VAR (Air+Weather)":
+            selected_model = models[selected_model_name]
+            st.caption("Using pre-trained VAR model (Air + Weather multivariate)")
+            
+            # Use combined_df (Training + Real-time) for forecasting
+            combined_df = pd.concat([air_df, weather_df], axis=1)
+            
+            # VAR needs lagged observations
+            if combined_df.isnull().any().any():
+                # Fill missing values if any
+                combined_df = combined_df.ffill().bfill()
+            
+            forecast_data = combined_df
+            
+            with st.spinner("Generating forecast..."):
+                lag_order = selected_model.k_ar
+                
+                # Check if we have enough data
+                if len(combined_df) < lag_order:
+                    st.error(f"Not enough data for VAR forecast. Need at least {lag_order} hours.")
+                else:
+                    last_obs = combined_df.values[-lag_order:]
+                    
+                    forecast_values, forecast_df = generate_var_forecast(
+                        selected_model, last_obs=last_obs, steps=forecast_hours
+                    )
+        
+        else:
+            st.error(f"Unknown model type: {selected_model_name}")
+            return
         
         # Create and display plot
         fig = create_forecast_plot(forecast_data, forecast_df, forecast_hours)
